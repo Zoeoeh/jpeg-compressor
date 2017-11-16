@@ -1,4 +1,4 @@
-OBJS=jpge.o jpgd.o encoder.o
+OBJS=src/jpge.o src/jpgd.o src/encoder.o
 BIN=encoder
 CXXFLAGS ?= -O3 -ffast-math -fno-signed-zeros
 
