@@ -28,6 +28,8 @@
 #include <thread>
 #include <vector>
 #include <functional>
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 
 
 
@@ -124,95 +126,97 @@ void image::subsample(image &luma, int v_samp)
 }
 
 
-// Forward DCT
+//Forward DCT
 static void dct(dct_t *data)
 {
-    dct_t z1, z2, z3, z4, z5, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp10, tmp11, tmp12, tmp13, *data_ptr;
+	dct_t z1, z2, z3, z4, z5, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp10, tmp11, tmp12, tmp13, *data_ptr;
 
-    data_ptr = data;
+	data_ptr = data;
 
-    for (int c=0; c < 8; c++) {
-        tmp0 = data_ptr[0] + data_ptr[7];
-        tmp7 = data_ptr[0] - data_ptr[7];
-        tmp1 = data_ptr[1] + data_ptr[6];
-        tmp6 = data_ptr[1] - data_ptr[6];
-        tmp2 = data_ptr[2] + data_ptr[5];
-        tmp5 = data_ptr[2] - data_ptr[5];
-        tmp3 = data_ptr[3] + data_ptr[4];
-        tmp4 = data_ptr[3] - data_ptr[4];
-        tmp10 = tmp0 + tmp3;
-        tmp13 = tmp0 - tmp3;
-        tmp11 = tmp1 + tmp2;
-        tmp12 = tmp1 - tmp2;
-        data_ptr[0] = tmp10 + tmp11;
-        data_ptr[4] = tmp10 - tmp11;
-        z1 = (tmp12 + tmp13) * 0.541196100;
-        data_ptr[2] = z1 + tmp13 * 0.765366865;
-        data_ptr[6] = z1 + tmp12 * - 1.847759065;
-        z1 = tmp4 + tmp7;
-        z2 = tmp5 + tmp6;
-        z3 = tmp4 + tmp6;
-        z4 = tmp5 + tmp7;
-        z5 = (z3 + z4) * 1.175875602;
-        tmp4 *= 0.298631336;
-        tmp5 *= 2.053119869;
-        tmp6 *= 3.072711026;
-        tmp7 *= 1.501321110;
-        z1 *= -0.899976223;
-        z2 *= -2.562915447;
-        z3 *= -1.961570560;
-        z4 *= -0.390180644;
-        z3 += z5;
-        z4 += z5;
-        data_ptr[7] = tmp4 + z1 + z3;
-        data_ptr[5] = tmp5 + z2 + z4;
-        data_ptr[3] = tmp6 + z2 + z3;
-        data_ptr[1] = tmp7 + z1 + z4;
-        data_ptr += 8;
-    }
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[0] + data_ptr[7];
+		tmp7 = data_ptr[0] - data_ptr[7];
+		tmp1 = data_ptr[1] + data_ptr[6];
+		tmp6 = data_ptr[1] - data_ptr[6];
+		tmp2 = data_ptr[2] + data_ptr[5];
+		tmp5 = data_ptr[2] - data_ptr[5];
+		tmp3 = data_ptr[3] + data_ptr[4];
+		tmp4 = data_ptr[3] - data_ptr[4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[0] = tmp10 + tmp11;
+		data_ptr[4] = tmp10 - tmp11;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[2] = z1 + tmp13 * 0.765366865;
+		data_ptr[6] = z1 + tmp12 * -1.847759065;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[7] = tmp4 + z1 + z3;
+		data_ptr[5] = tmp5 + z2 + z4;
+		data_ptr[3] = tmp6 + z2 + z3;
+		data_ptr[1] = tmp7 + z1 + z4;
+		data_ptr += 8;
+	}
 
-    data_ptr = data;
+	data_ptr = data;
 
-    for (int c=0; c < 8; c++) {
-        tmp0 = data_ptr[8*0] + data_ptr[8*7];
-        tmp7 = data_ptr[8*0] - data_ptr[8*7];
-        tmp1 = data_ptr[8*1] + data_ptr[8*6];
-        tmp6 = data_ptr[8*1] - data_ptr[8*6];
-        tmp2 = data_ptr[8*2] + data_ptr[8*5];
-        tmp5 = data_ptr[8*2] - data_ptr[8*5];
-        tmp3 = data_ptr[8*3] + data_ptr[8*4];
-        tmp4 = data_ptr[8*3] - data_ptr[8*4];
-        tmp10 = tmp0 + tmp3;
-        tmp13 = tmp0 - tmp3;
-        tmp11 = tmp1 + tmp2;
-        tmp12 = tmp1 - tmp2;
-        data_ptr[8*0] = (tmp10 + tmp11) / 8.0;
-        data_ptr[8*4] = (tmp10 - tmp11) / 8.0;
-        z1 = (tmp12 + tmp13) * 0.541196100;
-        data_ptr[8*2] = (z1 + tmp13 * 0.765366865) / 8.0;
-        data_ptr[8*6] = (z1 + tmp12 * -1.847759065) / 8.0;
-        z1 = tmp4 + tmp7;
-        z2 = tmp5 + tmp6;
-        z3 = tmp4 + tmp6;
-        z4 = tmp5 + tmp7;
-        z5 = (z3 + z4) * 1.175875602;
-        tmp4 *= 0.298631336;
-        tmp5 *= 2.053119869;
-        tmp6 *= 3.072711026;
-        tmp7 *= 1.501321110;
-        z1 *= -0.899976223;
-        z2 *= -2.562915447;
-        z3 *= -1.961570560;
-        z4 *= -0.390180644;
-        z3 += z5;
-        z4 += z5;
-        data_ptr[8*7] = (tmp4 + z1 + z3) / 8.0;
-        data_ptr[8*5] = (tmp5 + z2 + z4) / 8.0;
-        data_ptr[8*3] = (tmp6 + z2 + z3) / 8.0;
-        data_ptr[8*1] = (tmp7 + z1 + z4) / 8.0;
-        data_ptr++;
-    }
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[8 * 0] + data_ptr[8 * 7];
+		tmp7 = data_ptr[8 * 0] - data_ptr[8 * 7];
+		tmp1 = data_ptr[8 * 1] + data_ptr[8 * 6];
+		tmp6 = data_ptr[8 * 1] - data_ptr[8 * 6];
+		tmp2 = data_ptr[8 * 2] + data_ptr[8 * 5];
+		tmp5 = data_ptr[8 * 2] - data_ptr[8 * 5];
+		tmp3 = data_ptr[8 * 3] + data_ptr[8 * 4];
+		tmp4 = data_ptr[8 * 3] - data_ptr[8 * 4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[8 * 0] = (tmp10 + tmp11) / 8.0;
+		data_ptr[8 * 4] = (tmp10 - tmp11) / 8.0;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[8 * 2] = (z1 + tmp13 * 0.765366865) / 8.0;
+		data_ptr[8 * 6] = (z1 + tmp12 * -1.847759065) / 8.0;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[8 * 7] = (tmp4 + z1 + z3) / 8.0;
+		data_ptr[8 * 5] = (tmp5 + z2 + z4) / 8.0;
+		data_ptr[8 * 3] = (tmp6 + z2 + z3) / 8.0;
+		data_ptr[8 * 1] = (tmp7 + z1 + z4) / 8.0;
+		data_ptr++;
+	}
 }
+
+
 
 struct sym_freq {
     uint m_key, m_sym_index;
@@ -866,35 +870,273 @@ void quantiseThreaded(image& m_image, huffman_dcac& m_huff, int x, int y)
 	}
 }
 
+// Forward DCT cuda
+__device__ void dctCUDA(dct_t *data)
+{
+	dct_t z1, z2, z3, z4, z5, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp10, tmp11, tmp12, tmp13, *data_ptr;
+
+	data_ptr = data;
+
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[0] + data_ptr[7];
+		tmp7 = data_ptr[0] - data_ptr[7];
+		tmp1 = data_ptr[1] + data_ptr[6];
+		tmp6 = data_ptr[1] - data_ptr[6];
+		tmp2 = data_ptr[2] + data_ptr[5];
+		tmp5 = data_ptr[2] - data_ptr[5];
+		tmp3 = data_ptr[3] + data_ptr[4];
+		tmp4 = data_ptr[3] - data_ptr[4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[0] = tmp10 + tmp11;
+		data_ptr[4] = tmp10 - tmp11;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[2] = z1 + tmp13 * 0.765366865;
+		data_ptr[6] = z1 + tmp12 * -1.847759065;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[7] = tmp4 + z1 + z3;
+		data_ptr[5] = tmp5 + z2 + z4;
+		data_ptr[3] = tmp6 + z2 + z3;
+		data_ptr[1] = tmp7 + z1 + z4;
+		data_ptr += 8;
+	}
+
+	data_ptr = data;
+
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[8 * 0] + data_ptr[8 * 7];
+		tmp7 = data_ptr[8 * 0] - data_ptr[8 * 7];
+		tmp1 = data_ptr[8 * 1] + data_ptr[8 * 6];
+		tmp6 = data_ptr[8 * 1] - data_ptr[8 * 6];
+		tmp2 = data_ptr[8 * 2] + data_ptr[8 * 5];
+		tmp5 = data_ptr[8 * 2] - data_ptr[8 * 5];
+		tmp3 = data_ptr[8 * 3] + data_ptr[8 * 4];
+		tmp4 = data_ptr[8 * 3] - data_ptr[8 * 4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[8 * 0] = (tmp10 + tmp11) / 8.0;
+		data_ptr[8 * 4] = (tmp10 - tmp11) / 8.0;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[8 * 2] = (z1 + tmp13 * 0.765366865) / 8.0;
+		data_ptr[8 * 6] = (z1 + tmp12 * -1.847759065) / 8.0;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[8 * 7] = (tmp4 + z1 + z3) / 8.0;
+		data_ptr[8 * 5] = (tmp5 + z2 + z4) / 8.0;
+		data_ptr[8 * 3] = (tmp6 + z2 + z3) / 8.0;
+		data_ptr[8 * 1] = (tmp7 + z1 + z4) / 8.0;
+		data_ptr++;
+	}
+}
+
+
+// m huff is an array of int32s 
+__global__ void quantiseCUDA(image* m_image, int32* m_huff, uint8* s_zag, int* xbuff, int* ybuff)
+{
+
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	int x = xbuff[idx];
+	int y = ybuff[idx];
+
+	dct_t sample[64];
+	//m_image->load_block(sample, x, y);
+
+	dct_t *pDst = sample;
+
+	// load block
+	int m_x = m_image->m_x;
+
+
+	for (int i = 0; i < 8; i++, pDst += 8) {
+
+		pDst[0] = m_image->m_pixels[(y + i)*m_x + x + 0];// get_px(x + 0, y + i);
+		pDst[1] = m_image->m_pixels[(y + i)*m_x + x + 1];// get_px(x + 1, y + i);
+		pDst[2] = m_image->m_pixels[(y + i)*m_x + x + 2];// get_px(x + 2, y + i);
+		pDst[3] = m_image->m_pixels[(y + i)*m_x + x + 3];// get_px(x + 3, y + i);
+		pDst[4] = m_image->m_pixels[(y + i)*m_x + x + 4];// get_px(x + 4, y + i);
+		pDst[5] = m_image->m_pixels[(y + i)*m_x + x + 5];// get_px(x + 5, y + i);
+		pDst[6] = m_image->m_pixels[(y + i)*m_x + x + 6];// get_px(x + 6, y + i);
+		pDst[7] = m_image->m_pixels[(y + i)*m_x + x + 7];// get_px(x + 7, y + i);
+	}
+
+
+	// quantise pixels
+	dctCUDA(sample);
+	for (int i = 0; i < 64; i++) {
+
+		//m_image.get_dctq(x, y)[i] = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
+		auto ptr = &m_image->m_dctqs[64 * (y / 8 * m_image->m_x / 8 + x / 8)];
+		ptr[i];// = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
+
+			   // round to zero
+		if (sample[s_zag[i]] < 0) {
+			dctq_t jtmp = -sample[s_zag[i]] + (m_huff[i] >> 1);
+			ptr[i] = (jtmp < m_huff[i]) ? 0 : static_cast<dctq_t>(-(jtmp / m_huff[i]));
+		}
+		else {
+			dctq_t jtmp = sample[s_zag[i]] + (m_huff[i] >> 1);
+			ptr[i] = (jtmp < m_huff[i]) ? 0 : static_cast<dctq_t>((jtmp / m_huff[i]));
+		}
+	}
+}
+
 bool jpeg_encoder::compress_image()
 {
 	// timer start here
 	auto startTime = std::chrono::system_clock::now();
 	std::vector<std::thread> threads;
 
-	// possible area of speed-upc
-	int c = 0;
-   // for(int c=0; c < m_num_components; c++) {
-        
-		
-		for (int y = 0; y < m_image[c].m_y; y+= 8) {
-			for (int x = 0; x < m_image[c].m_x; x += 8) {
-				
-				cout << x << endl;
-				//threads.push_back(thread(&quantiseThread, this, c, x, y));
-				threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
-            }
-        } 
+	// declare huffman tables onto memory
 
-  //  }
-	int i = 0;
-	for (auto &t : threads)
+	auto data_size = sizeof(image) * m_num_components;
+	auto h_size = sizeof(m_huff);
+	auto z_size = sizeof(s_zag);
+
+	// image in 	
+	image* imgBuffer;
+	// huffman in
+	int32* huffBuff;
+
+	//s_zag in 
+	uint8* zagBuff;
+
+	int *xBuff, *yBuff;
+
+	vector<int> x_;
+	vector<int> y_;
+
+	int c = 0;
+
+	auto sizeX = sizeof(x_);
+	auto sizeY = sizeof(y_);
+
+	for (int y = 0; y < m_image[c].m_y; y+= 8)
 	{
-		t.join();
-		i++;
-		cout << i << " joined" << endl;
+		for (int x = 0; x < m_image[c].m_x; x += 8)
+		{
+			
+			x_.push_back(x);
+			y_.push_back(y);
+		}
 	}
 
+	cudaMalloc((void**)&imgBuffer, data_size);
+	cudaMalloc((void**)&huffBuff, h_size);
+	cudaMalloc((void**)&zagBuff, z_size);
+	cudaMalloc((void**)&xBuff, sizeX);
+	cudaMalloc((void**)&yBuff, sizeY);
+
+
+	cudaMemcpy(imgBuffer, &m_image[c], data_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(huffBuff, &m_huff[c > 0].m_quantization_table, h_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(zagBuff, &s_zag, z_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(xBuff, &x_, sizeX, cudaMemcpyHostToDevice);
+	cudaMemcpy(yBuff, &y_, sizeY, cudaMemcpyHostToDevice);
+
+
+	//// attempt to unravel loops
+	// //don't think the array's are being copied properly
+	quantiseCUDA <<< x_.size()/ 1024, 1024 >>>(imgBuffer, huffBuff, zagBuff, xBuff, yBuff);
+
+	cudaDeviceSynchronize();
+	cudaMemcpy(&m_image, imgBuffer, data_size, cudaMemcpyDeviceToHost);
+
+	cudaFree(imgBuffer);
+	cudaFree(huffBuff);
+	cudaFree(zagBuff);
+
+	//for (int y = 0; y < m_image[c].m_y; y+= 8) {
+	//	for (int x = 0; x < m_image[c].m_x; x += 8) {
+	//		
+	//		cout << x << endl;
+	//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
+	//	    threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
+	//          }
+	//      } 
+
+	//c++;
+	//for (int y = 0; y < m_image[c].m_y; y += 8) {
+	//	for (int x = 0; x < m_image[c].m_x; x += 8) {
+
+	//		cout << x << endl;
+	//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
+	//		threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
+	//	}
+	//}
+
+	//c++;
+	//for (int y = 0; y < m_image[c].m_y; y += 8) {
+	//	for (int x = 0; x < m_image[c].m_x; x += 8) {
+
+	//		cout << x << endl;
+	//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
+	//		threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
+	//	}
+	//}
+
+
+	// possible area of speed-up
+  //  for(int c=0; c < m_num_components; c++) {
+  //      
+		//
+		//for (int y = 0; y < m_image[c].m_y; y+= 8) {
+		//	for (int x = 0; x < m_image[c].m_x; x += 8) {
+		//		
+		//		cout << x << endl;
+		//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
+		//		//threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
+
+		//		// need to pass in this quantisation table to cuda m_huff[c > 0].m_quantization_table;
+
+		//		// run kernel
+
+  //          }
+  //      } 
+
+  //  }
+
+	// join threads
+	//int i = 0;
+	//for (auto &t : threads)
+	//{
+	//	t.join();
+	//	i++;
+	//	cout << i << " joined" << endl;
+	//}
+
+	// continue sequentially
     for (int y = 0; y < m_y; y+= m_mcu_h) {
         code_mcu_row(y, false);
     }
