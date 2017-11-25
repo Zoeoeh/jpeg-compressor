@@ -22,9 +22,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <chrono>
+#include <iostream>
+#include <memory>
+#include <thread>
+#include <vector>
+#include <functional>
 
 #define JPGE_MAX(a,b) (((a)>(b))?(a):(b))
 #define JPGE_MIN(a,b) (((a)<(b))?(a):(b))
+
+using namespace std;
 
 namespace jpge
 {
@@ -821,17 +829,72 @@ bool jpeg_encoder::emit_end_markers()
     return m_all_stream_writes_succeeded;
 }
 
+// test thread with member vars
+void jpeg_encoder::quantiseThread(int c, int x, int y)
+{
+	dct_t sample[64];
+	m_image[c].load_block(sample, x, y);
+	quantize_pixels(sample, m_image[c].get_dctq(x, y), m_huff[c > 0].m_quantization_table);
+}
+
+// test thread with references
+void quantiseThreaded(image& m_image, huffman_dcac& m_huff, int x, int y)
+{
+	// cuda only needs 
+
+	dct_t sample[64];
+	m_image.load_block(sample, x, y);
+	// quantise pixels
+	dct(sample);
+	for (int i = 0; i < 64; i++) {
+
+		//m_image.get_dctq(x, y)[i] = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
+		auto ptr = &m_image.m_dctqs[64 * (y / 8 * m_image.m_x / 8 + x / 8)];
+		ptr[i];// = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
+
+		// round to zero
+		if (sample[s_zag[i]] < 0) {
+			dctq_t jtmp = -sample[s_zag[i]] + (m_huff.m_quantization_table[i] >> 1);
+			ptr[i] = (jtmp < m_huff.m_quantization_table[i]) ? 0 : static_cast<dctq_t>(-(jtmp / m_huff.m_quantization_table[i]));
+		}
+		else {
+			dctq_t jtmp = sample[s_zag[i]] + (m_huff.m_quantization_table[i] >> 1);
+			ptr[i] = (jtmp < m_huff.m_quantization_table[i]) ? 0 : static_cast<dctq_t>((jtmp / m_huff.m_quantization_table[i]));
+		}
+	}
+}
+
+
+
+
+
 bool jpeg_encoder::compress_image()
 {
+	// timer start here
+	auto startTime = std::chrono::system_clock::now();
+	std::vector<std::thread> threads;
+
+	// possible area of speed-up
     for(int c=0; c < m_num_components; c++) {
-        for (int y = 0; y < m_image[c].m_y; y+= 8) {
-            for (int x = 0; x < m_image[c].m_x; x += 8) {
-                dct_t sample[64];
-                m_image[c].load_block(sample, x, y);
-                quantize_pixels(sample, m_image[c].get_dctq(x, y), m_huff[c > 0].m_quantization_table);
+        
+		
+		for (int y = 0; y < m_image[c].m_y; y+= 8) {
+			for (int x = 0; x < m_image[c].m_x; x += 8) {
+				
+				cout << x << endl;
+				//threads.push_back(thread(&quantiseThread, this, c, x, y));
+				threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
             }
-        }
+        } 
+
     }
+	int i = 0;
+	for (auto &t : threads)
+	{
+		t.join();
+		i++;
+		cout << i << " joined" << endl;
+	}
 
     for (int y = 0; y < m_y; y+= m_mcu_h) {
         code_mcu_row(y, false);
@@ -846,6 +909,11 @@ bool jpeg_encoder::compress_image()
         }
         code_mcu_row(y, true);
     }
+
+	// end timer
+	auto endTime = std::chrono::system_clock::now();
+	auto totalTime = endTime - startTime;
+	std::cout << "Time Taken " << std::chrono::duration_cast<std::chrono::milliseconds>(totalTime).count() << std::endl;
     return emit_end_markers();
 }
 

@@ -130,10 +130,10 @@ public:
     dctq_t *get_dctq(int x, int y);
 
     void subsample(image &luma, int v_samp);
-
+	dctq_t *m_dctqs; // quantized dcts        /// make this public to be accessed
 private:
     float *m_pixels;
-    dctq_t *m_dctqs; // quantized dcts
+	/// dctq_t *m_dctqs; // quantized dcts 
 
     dct_t blend_dual(int x, int y, image &);
     dct_t blend_quad(int x, int y, image &);
@@ -144,6 +144,9 @@ class jpeg_encoder {
 public:
     jpeg_encoder();
     ~jpeg_encoder();
+
+
+	void quantiseThread(int c, int x, int y);
 
     // Initializes the compressor.
     // pStream: The stream object to use for writing compressed data.
