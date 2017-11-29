@@ -970,58 +970,6 @@ __device__ void dctCUDA(double *data)
 	}
 }
 
-
-// m huff is an array of int32s 
-__global__ void quantiseCUDA(image* m_image, int32* m_huff, uint8* s_zag, int* xbuff, int* ybuff)
-{
-
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-	int x = xbuff[idx];
-	int y = ybuff[idx];
-
-	dct_t sample[64];
-	//m_image->load_block(sample, x, y);
-
-	dct_t *pDst = sample;
-
-	// load block
-	int m_x = m_image->m_x;
-
-
-	for (int i = 0; i < 8; i++, pDst += 8) {
-
-		pDst[0] = m_image->m_pixels[(y + i)*m_x + x + 0];// get_px(x + 0, y + i);
-		pDst[1] = m_image->m_pixels[(y + i)*m_x + x + 1];// get_px(x + 1, y + i);
-		pDst[2] = m_image->m_pixels[(y + i)*m_x + x + 2];// get_px(x + 2, y + i);
-		pDst[3] = m_image->m_pixels[(y + i)*m_x + x + 3];// get_px(x + 3, y + i);
-		pDst[4] = m_image->m_pixels[(y + i)*m_x + x + 4];// get_px(x + 4, y + i);
-		pDst[5] = m_image->m_pixels[(y + i)*m_x + x + 5];// get_px(x + 5, y + i);
-		pDst[6] = m_image->m_pixels[(y + i)*m_x + x + 6];// get_px(x + 6, y + i);
-		pDst[7] = m_image->m_pixels[(y + i)*m_x + x + 7];// get_px(x + 7, y + i);
-	}
-
-
-	// quantise pixels
-	dctCUDA(sample);
-	for (int i = 0; i < 64; i++) {
-
-		//m_image.get_dctq(x, y)[i] = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
-		auto ptr = &m_image->m_dctqs[64 * (y / 8 * m_image->m_x / 8 + x / 8)];
-		ptr[i];// = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
-
-			   // round to zero
-		if (sample[s_zag[i]] < 0) {
-			dctq_t jtmp = -sample[s_zag[i]] + (m_huff[i] >> 1);
-			ptr[i] = (jtmp < m_huff[i]) ? 0 : static_cast<dctq_t>(-(jtmp / m_huff[i]));
-		}
-		else {
-			dctq_t jtmp = sample[s_zag[i]] + (m_huff[i] >> 1);
-			ptr[i] = (jtmp < m_huff[i]) ? 0 : static_cast<dctq_t>((jtmp / m_huff[i]));
-		}
-	}
-}
-
 __global__ void quantiseALL(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
 {
 	// for each block. quanitse.
@@ -1073,6 +1021,54 @@ __global__ void quantiseALL(int max_x, int max_y, float * pixels, signed short* 
 	}
 }
 
+__global__ void quantiseKernel(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	// for each block. quanitse.
+	int y = threadIdx.x * 8;
+	int x = blockIdx.x * 8;
+
+	// do work
+
+	// *** load block of 64 pixels (8x8)
+
+	double sample[64];
+
+	double *pDst = sample;
+
+	for (int i = 0; i < 8; i++, pDst += 8)
+	{
+		// get each pixel into sample
+		pDst[0] = pixels[(y + i)*max_x + x + 0];
+		pDst[1] = pixels[(y + i)*max_x + x + 1];
+		pDst[2] = pixels[(y + i)*max_x + x + 2];
+		pDst[3] = pixels[(y + i)*max_x + x + 3];
+		pDst[4] = pixels[(y + i)*max_x + x + 4];
+		pDst[5] = pixels[(y + i)*max_x + x + 5];
+		pDst[6] = pixels[(y + i)*max_x + x + 6];
+		pDst[7] = pixels[(y + i)*max_x + x + 7];
+	}
+
+
+	// *** quantise the pixels
+	dctCUDA(sample);
+
+	// for each pixel in the block, round to zero using table and store in output
+	for (int i = 0; i < 64; i++)
+	{
+		auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+
+		// round to zero
+		if (sample[zag[i]] < 0) {
+			signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i]));
+		}
+		else {
+			signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i]));
+		}
+	}
+}
+
 void CheckCUDA()
 {
 	cudaError_t error = cudaGetLastError();
@@ -1115,84 +1111,21 @@ bool jpeg_encoder::compress_image()
 	cudaMemcpy(zagBuff, &s_zag[0], sizeof(unsigned char) * 64, cudaMemcpyHostToDevice);
 
 	CheckCUDA();
-	quantiseALL << < 1, 1 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+	//quantiseALL << < 1, 1 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+
+	quantiseKernel << < (maxX/8), (maxY/8) >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+
 	CheckCUDA();
 	cudaDeviceSynchronize();
 	CheckCUDA();
 
-
-	auto newBuff = static_cast<dctq_t *>(jpge_malloc(m_x * sizeof(dctq_t) * m_y));
-	cudaMemcpy(&newBuff[0], quantisedSampleBuff, sizeof(signed short)* maxX * maxY, cudaMemcpyDeviceToHost);
+	// copy back into image
+	cudaMemcpy(&m_image[c].m_dctqs[0], quantisedSampleBuff, sizeof(signed short)* maxX * maxY, cudaMemcpyDeviceToHost);
 
 	cudaFree(pixBuff);
 	cudaFree(quantisedSampleBuff);
 	cudaFree(huffBuff);
 	cudaFree(zagBuff);
-
-	for (int i = 0; i < (m_x * m_y); i++)
-	{
-		m_image[c].m_dctqs[i] = newBuff[i];
-	}
-
-	//for (int y = 0; y < m_image[c].m_y; y+= 8) {
-	//	for (int x = 0; x < m_image[c].m_x; x += 8) {
-	//		
-	//		cout << x << endl;
-	//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
-	//	    threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
-	//		//threads.push_back(thread(quantiseThreadCUDA));
-	//          }
-	//      } 
-
-	//c++;
-	//for (int y = 0; y < m_image[c].m_y; y += 8) {
-	//	for (int x = 0; x < m_image[c].m_x; x += 8) {
-
-	//		cout << x << endl;
-	//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
-	//		threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
-	//	}
-	//}
-
-	//c++;
-	//for (int y = 0; y < m_image[c].m_y; y += 8) {
-	//	for (int x = 0; x < m_image[c].m_x; x += 8) {
-
-	//		cout << x << endl;
-	//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
-	//		threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
-	//	}
-	//}
-
-
-	// possible area of speed-up
-  //  for(int c=0; c < m_num_components; c++) {
-  //      
-		//
-		//for (int y = 0; y < m_image[c].m_y; y+= 8) {
-		//	for (int x = 0; x < m_image[c].m_x; x += 8) {
-		//		
-		//		cout << x << endl;
-		//		//threads.push_back(thread(&quantiseThread, this, c, x, y));
-		//		//threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
-
-		//		// need to pass in this quantisation table to cuda m_huff[c > 0].m_quantization_table;
-
-		//		// run kernel
-
-  //          }
-  //      } 
-
-  //  }
-
-	// join threads
-	//int i = 0;
-	//for (auto &t : threads)
-	//{
-	//	t.join();
-	//	i++;
-	//	cout << i << " joined" << endl;
-	//}
 
 	// continue sequentially
     for (int y = 0; y < m_y; y+= m_mcu_h) {
