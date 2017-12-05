@@ -28,6 +28,8 @@
 #include <thread>
 #include <vector>
 #include <functional>
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 
 
 
@@ -124,95 +126,97 @@ void image::subsample(image &luma, int v_samp)
 }
 
 
-// Forward DCT
+//Forward DCT
 static void dct(dct_t *data)
 {
-    dct_t z1, z2, z3, z4, z5, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp10, tmp11, tmp12, tmp13, *data_ptr;
+	dct_t z1, z2, z3, z4, z5, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp10, tmp11, tmp12, tmp13, *data_ptr;
 
-    data_ptr = data;
+	data_ptr = data;
 
-    for (int c=0; c < 8; c++) {
-        tmp0 = data_ptr[0] + data_ptr[7];
-        tmp7 = data_ptr[0] - data_ptr[7];
-        tmp1 = data_ptr[1] + data_ptr[6];
-        tmp6 = data_ptr[1] - data_ptr[6];
-        tmp2 = data_ptr[2] + data_ptr[5];
-        tmp5 = data_ptr[2] - data_ptr[5];
-        tmp3 = data_ptr[3] + data_ptr[4];
-        tmp4 = data_ptr[3] - data_ptr[4];
-        tmp10 = tmp0 + tmp3;
-        tmp13 = tmp0 - tmp3;
-        tmp11 = tmp1 + tmp2;
-        tmp12 = tmp1 - tmp2;
-        data_ptr[0] = tmp10 + tmp11;
-        data_ptr[4] = tmp10 - tmp11;
-        z1 = (tmp12 + tmp13) * 0.541196100;
-        data_ptr[2] = z1 + tmp13 * 0.765366865;
-        data_ptr[6] = z1 + tmp12 * - 1.847759065;
-        z1 = tmp4 + tmp7;
-        z2 = tmp5 + tmp6;
-        z3 = tmp4 + tmp6;
-        z4 = tmp5 + tmp7;
-        z5 = (z3 + z4) * 1.175875602;
-        tmp4 *= 0.298631336;
-        tmp5 *= 2.053119869;
-        tmp6 *= 3.072711026;
-        tmp7 *= 1.501321110;
-        z1 *= -0.899976223;
-        z2 *= -2.562915447;
-        z3 *= -1.961570560;
-        z4 *= -0.390180644;
-        z3 += z5;
-        z4 += z5;
-        data_ptr[7] = tmp4 + z1 + z3;
-        data_ptr[5] = tmp5 + z2 + z4;
-        data_ptr[3] = tmp6 + z2 + z3;
-        data_ptr[1] = tmp7 + z1 + z4;
-        data_ptr += 8;
-    }
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[0] + data_ptr[7];
+		tmp7 = data_ptr[0] - data_ptr[7];
+		tmp1 = data_ptr[1] + data_ptr[6];
+		tmp6 = data_ptr[1] - data_ptr[6];
+		tmp2 = data_ptr[2] + data_ptr[5];
+		tmp5 = data_ptr[2] - data_ptr[5];
+		tmp3 = data_ptr[3] + data_ptr[4];
+		tmp4 = data_ptr[3] - data_ptr[4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[0] = tmp10 + tmp11;
+		data_ptr[4] = tmp10 - tmp11;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[2] = z1 + tmp13 * 0.765366865;
+		data_ptr[6] = z1 + tmp12 * -1.847759065;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[7] = tmp4 + z1 + z3;
+		data_ptr[5] = tmp5 + z2 + z4;
+		data_ptr[3] = tmp6 + z2 + z3;
+		data_ptr[1] = tmp7 + z1 + z4;
+		data_ptr += 8;
+	}
 
-    data_ptr = data;
+	data_ptr = data;
 
-    for (int c=0; c < 8; c++) {
-        tmp0 = data_ptr[8*0] + data_ptr[8*7];
-        tmp7 = data_ptr[8*0] - data_ptr[8*7];
-        tmp1 = data_ptr[8*1] + data_ptr[8*6];
-        tmp6 = data_ptr[8*1] - data_ptr[8*6];
-        tmp2 = data_ptr[8*2] + data_ptr[8*5];
-        tmp5 = data_ptr[8*2] - data_ptr[8*5];
-        tmp3 = data_ptr[8*3] + data_ptr[8*4];
-        tmp4 = data_ptr[8*3] - data_ptr[8*4];
-        tmp10 = tmp0 + tmp3;
-        tmp13 = tmp0 - tmp3;
-        tmp11 = tmp1 + tmp2;
-        tmp12 = tmp1 - tmp2;
-        data_ptr[8*0] = (tmp10 + tmp11) / 8.0;
-        data_ptr[8*4] = (tmp10 - tmp11) / 8.0;
-        z1 = (tmp12 + tmp13) * 0.541196100;
-        data_ptr[8*2] = (z1 + tmp13 * 0.765366865) / 8.0;
-        data_ptr[8*6] = (z1 + tmp12 * -1.847759065) / 8.0;
-        z1 = tmp4 + tmp7;
-        z2 = tmp5 + tmp6;
-        z3 = tmp4 + tmp6;
-        z4 = tmp5 + tmp7;
-        z5 = (z3 + z4) * 1.175875602;
-        tmp4 *= 0.298631336;
-        tmp5 *= 2.053119869;
-        tmp6 *= 3.072711026;
-        tmp7 *= 1.501321110;
-        z1 *= -0.899976223;
-        z2 *= -2.562915447;
-        z3 *= -1.961570560;
-        z4 *= -0.390180644;
-        z3 += z5;
-        z4 += z5;
-        data_ptr[8*7] = (tmp4 + z1 + z3) / 8.0;
-        data_ptr[8*5] = (tmp5 + z2 + z4) / 8.0;
-        data_ptr[8*3] = (tmp6 + z2 + z3) / 8.0;
-        data_ptr[8*1] = (tmp7 + z1 + z4) / 8.0;
-        data_ptr++;
-    }
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[8 * 0] + data_ptr[8 * 7];
+		tmp7 = data_ptr[8 * 0] - data_ptr[8 * 7];
+		tmp1 = data_ptr[8 * 1] + data_ptr[8 * 6];
+		tmp6 = data_ptr[8 * 1] - data_ptr[8 * 6];
+		tmp2 = data_ptr[8 * 2] + data_ptr[8 * 5];
+		tmp5 = data_ptr[8 * 2] - data_ptr[8 * 5];
+		tmp3 = data_ptr[8 * 3] + data_ptr[8 * 4];
+		tmp4 = data_ptr[8 * 3] - data_ptr[8 * 4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[8 * 0] = (tmp10 + tmp11) / 8.0;
+		data_ptr[8 * 4] = (tmp10 - tmp11) / 8.0;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[8 * 2] = (z1 + tmp13 * 0.765366865) / 8.0;
+		data_ptr[8 * 6] = (z1 + tmp12 * -1.847759065) / 8.0;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[8 * 7] = (tmp4 + z1 + z3) / 8.0;
+		data_ptr[8 * 5] = (tmp5 + z2 + z4) / 8.0;
+		data_ptr[8 * 3] = (tmp6 + z2 + z3) / 8.0;
+		data_ptr[8 * 1] = (tmp7 + z1 + z4) / 8.0;
+		data_ptr++;
+	}
 }
+
+
 
 struct sym_freq {
     uint m_key, m_sym_index;
@@ -844,6 +848,10 @@ void quantiseThreaded(image& m_image, huffman_dcac& m_huff, int x, int y)
 {
 	// cuda only needs some parts of image so maybe load differently
 
+	//thread::id this_id = std::this_thread::get_id();
+
+	//cout << this_id << " : " << x << ", " << y << endl;
+
 	dct_t sample[64];
 	m_image.load_block(sample, x, y);
 	// quantise pixels
@@ -852,7 +860,6 @@ void quantiseThreaded(image& m_image, huffman_dcac& m_huff, int x, int y)
 
 		//m_image.get_dctq(x, y)[i] = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
 		auto ptr = &m_image.m_dctqs[64 * (y / 8 * m_image.m_x / 8 + x / 8)];
-		ptr[i];// = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
 
 		// round to zero
 		if (sample[s_zag[i]] < 0) {
@@ -866,35 +873,499 @@ void quantiseThreaded(image& m_image, huffman_dcac& m_huff, int x, int y)
 	}
 }
 
+// test thread with cuda vals
+void quantiseThreadCUDA()
+{
+
+}
+
+// Forward DCT cuda
+__device__ void dctCUDA(double *data)
+{
+	double z1, z2, z3, z4, z5, tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp10, tmp11, tmp12, tmp13, *data_ptr;
+
+	data_ptr = data;
+
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[0] + data_ptr[7];
+		tmp7 = data_ptr[0] - data_ptr[7];
+		tmp1 = data_ptr[1] + data_ptr[6];
+		tmp6 = data_ptr[1] - data_ptr[6];
+		tmp2 = data_ptr[2] + data_ptr[5];
+		tmp5 = data_ptr[2] - data_ptr[5];
+		tmp3 = data_ptr[3] + data_ptr[4];
+		tmp4 = data_ptr[3] - data_ptr[4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[0] = tmp10 + tmp11;
+		data_ptr[4] = tmp10 - tmp11;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[2] = z1 + tmp13 * 0.765366865;
+		data_ptr[6] = z1 + tmp12 * -1.847759065;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[7] = tmp4 + z1 + z3;
+		data_ptr[5] = tmp5 + z2 + z4;
+		data_ptr[3] = tmp6 + z2 + z3;
+		data_ptr[1] = tmp7 + z1 + z4;
+		data_ptr += 8;
+	}
+
+	data_ptr = data;
+
+	for (int c = 0; c < 8; c++) {
+		tmp0 = data_ptr[8 * 0] + data_ptr[8 * 7];
+		tmp7 = data_ptr[8 * 0] - data_ptr[8 * 7];
+		tmp1 = data_ptr[8 * 1] + data_ptr[8 * 6];
+		tmp6 = data_ptr[8 * 1] - data_ptr[8 * 6];
+		tmp2 = data_ptr[8 * 2] + data_ptr[8 * 5];
+		tmp5 = data_ptr[8 * 2] - data_ptr[8 * 5];
+		tmp3 = data_ptr[8 * 3] + data_ptr[8 * 4];
+		tmp4 = data_ptr[8 * 3] - data_ptr[8 * 4];
+		tmp10 = tmp0 + tmp3;
+		tmp13 = tmp0 - tmp3;
+		tmp11 = tmp1 + tmp2;
+		tmp12 = tmp1 - tmp2;
+		data_ptr[8 * 0] = (tmp10 + tmp11) / 8.0;
+		data_ptr[8 * 4] = (tmp10 - tmp11) / 8.0;
+		z1 = (tmp12 + tmp13) * 0.541196100;
+		data_ptr[8 * 2] = (z1 + tmp13 * 0.765366865) / 8.0;
+		data_ptr[8 * 6] = (z1 + tmp12 * -1.847759065) / 8.0;
+		z1 = tmp4 + tmp7;
+		z2 = tmp5 + tmp6;
+		z3 = tmp4 + tmp6;
+		z4 = tmp5 + tmp7;
+		z5 = (z3 + z4) * 1.175875602;
+		tmp4 *= 0.298631336;
+		tmp5 *= 2.053119869;
+		tmp6 *= 3.072711026;
+		tmp7 *= 1.501321110;
+		z1 *= -0.899976223;
+		z2 *= -2.562915447;
+		z3 *= -1.961570560;
+		z4 *= -0.390180644;
+		z3 += z5;
+		z4 += z5;
+		data_ptr[8 * 7] = (tmp4 + z1 + z3) / 8.0;
+		data_ptr[8 * 5] = (tmp5 + z2 + z4) / 8.0;
+		data_ptr[8 * 3] = (tmp6 + z2 + z3) / 8.0;
+		data_ptr[8 * 1] = (tmp7 + z1 + z4) / 8.0;
+		data_ptr++;
+	}
+}
+
+__global__ void quantiseALL(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	// for each block. quanitse.
+	for (int y = 0; y < max_y; y += 8)
+	{
+		for (int x = 0; x <max_x; x += 8)
+		{
+			// do work
+
+			// *** load block of 64 pixels (8x8)
+			
+			double sample[64];
+
+			double *pDst = sample;
+
+			for (int i = 0; i < 8; i++, pDst += 8)
+			{
+				// get each pixel into sample
+				pDst[0] = pixels[(y + i)*max_x + x + 0];
+				pDst[1] = pixels[(y + i)*max_x + x + 1];
+				pDst[2] = pixels[(y + i)*max_x + x + 2];
+				pDst[3] = pixels[(y + i)*max_x + x + 3];
+				pDst[4] = pixels[(y + i)*max_x + x + 4];
+				pDst[5] = pixels[(y + i)*max_x + x + 5];
+				pDst[6] = pixels[(y + i)*max_x + x + 6];
+				pDst[7] = pixels[(y + i)*max_x + x + 7];
+			}
+			
+		
+			// *** quantise the pixels
+			dctCUDA(sample);
+			
+			// for each pixel in the block, round to zero using table and store in output
+			for (int i = 0; i < 64; i++)
+			{
+				auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+				
+			    // round to zero
+				if (sample[zag[i]] < 0) {
+					signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+					ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i]));
+				}
+				else {
+					signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+					ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i]));
+				}
+			}
+		}
+	}
+}
+
+__global__ void quantiseALLOFFSET(int offset, int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	// for each block. quanitse.
+	//for (int c = 0; c < offset; c++)
+	{
+		for (int y = (c * max_y); y < max_y + (c*max_y); y += 8)
+		{
+
+	/*		printf("y = %d max_y * offfset = %d\n", y, max_y + (c* max_y));*/
+			for (int x = (c * max_x); x < max_x + (c*max_x); x += 8)
+			{
+				//printf("x = %d max_x * offfset = %d\n", x, max_y + (c* max_y));
+				// do work
+
+				// *** load block of 64 pixels (8x8)
+
+				double sample[64];
+
+				double *pDst = sample;
+
+				for (int i = 0; i < 8; i++, pDst += 8)
+				{
+					// get each pixel into sample
+					pDst[0] = pixels[(y + i)* max_x  + x + 0];
+					pDst[1] = pixels[(y + i)* max_x  + x + 1];
+					pDst[2] = pixels[(y + i)* max_x  + x + 2];
+					pDst[3] = pixels[(y + i)* max_x  + x + 3];
+					pDst[4] = pixels[(y + i)* max_x  + x + 4];
+					pDst[5] = pixels[(y + i)* max_x  + x + 5];
+					pDst[6] = pixels[(y + i)* max_x  + x + 6];
+					pDst[7] = pixels[(y + i)* max_x  + x + 7];
+				}
+
+
+				// *** quantise the pixels
+				dctCUDA(sample);
+
+				// for each pixel in the block, round to zero using table and store in output
+				for (int i = 0; i < 64; i++)
+				{
+					auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+
+					signed int huffQ;
+					//if (x > 64 || y > 64)
+					//	huffQ = huffman_quantise_table[i + 64];
+					//else
+						huffQ = huffman_quantise_table[i];
+
+					// round to zero
+					if (sample[zag[i]] < 0) {
+						signed short jtmp = -sample[zag[i]] + (huffQ >> 1);
+						ptr[i] = (jtmp < huffQ) ? 0 : static_cast<signed short>(-(jtmp / huffQ));
+					}
+					else {
+						signed short jtmp = sample[zag[i]] + (huffQ >> 1);
+						ptr[i] = (jtmp < huffQ) ? 0 : static_cast<signed short>((jtmp / huffQ));
+					}
+				}
+			}
+		}
+	}
+}
+
+__global__ void quantiseManyThreads(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	int y = threadIdx.x * 8;
+
+	for (int x = 0; x <max_x; x += 8)
+	{
+		// do work
+
+		// *** load block of 64 pixels (8x8)
+
+		double sample[64];
+
+		double *pDst = sample;
+
+		for (int i = 0; i < 8; i++, pDst += 8)
+		{
+			// get each pixel into sample
+			pDst[0] = pixels[(y + i)*max_x + x + 0];
+			pDst[1] = pixels[(y + i)*max_x + x + 1];
+			pDst[2] = pixels[(y + i)*max_x + x + 2];
+			pDst[3] = pixels[(y + i)*max_x + x + 3];
+			pDst[4] = pixels[(y + i)*max_x + x + 4];
+			pDst[5] = pixels[(y + i)*max_x + x + 5];
+			pDst[6] = pixels[(y + i)*max_x + x + 6];
+			pDst[7] = pixels[(y + i)*max_x + x + 7];
+		}
+
+
+		// *** quantise the pixels
+		dctCUDA(sample);
+
+		// for each pixel in the block, round to zero using table and store in output
+		for (int i = 0; i < 64; i++)
+		{
+			auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+
+			// round to zero
+			if (sample[zag[i]] < 0) {
+				signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+				ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i]));
+			}
+			else {
+				signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+				ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i]));
+			}
+		}
+	}
+	
+}
+
+__global__ void quantiseManyBlocks(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	int y = blockIdx.x * 8;
+
+	for (int x = 0; x <max_x; x += 8)
+	{
+		// do work
+
+		// *** load block of 64 pixels (8x8)
+
+		double sample[64];
+
+		double *pDst = sample;
+
+		for (int i = 0; i < 8; i++, pDst += 8)
+		{
+			// get each pixel into sample
+			pDst[0] = pixels[(y + i)*max_x + x + 0];
+			pDst[1] = pixels[(y + i)*max_x + x + 1];
+			pDst[2] = pixels[(y + i)*max_x + x + 2];
+			pDst[3] = pixels[(y + i)*max_x + x + 3];
+			pDst[4] = pixels[(y + i)*max_x + x + 4];
+			pDst[5] = pixels[(y + i)*max_x + x + 5];
+			pDst[6] = pixels[(y + i)*max_x + x + 6];
+			pDst[7] = pixels[(y + i)*max_x + x + 7];
+		}
+
+
+		// *** quantise the pixels
+		dctCUDA(sample);
+
+		// for each pixel in the block, round to zero using table and store in output
+		for (int i = 0; i < 64; i++)
+		{
+			auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+
+			// round to zero
+			if (sample[zag[i]] < 0) {
+				signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+				ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i]));
+			}
+			else {
+				signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+				ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i]));
+			}
+		}
+	}
+
+}
+
+__global__ void quantiseKernel(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	// for each block. quanitse.
+	int y = threadIdx.x * 8;
+	int x = blockIdx.x * 8;
+
+	// do work
+
+	// *** load block of 64 pixels (8x8)
+
+	double sample[64];
+
+	double *pDst = sample;
+
+	for (int i = 0; i < 8; i++, pDst += 8)
+	{
+		// get each pixel into sample
+		pDst[0] = pixels[(y + i)*max_x + x + 0];
+		pDst[1] = pixels[(y + i)*max_x + x + 1];
+		pDst[2] = pixels[(y + i)*max_x + x + 2];
+		pDst[3] = pixels[(y + i)*max_x + x + 3];
+		pDst[4] = pixels[(y + i)*max_x + x + 4];
+		pDst[5] = pixels[(y + i)*max_x + x + 5];
+		pDst[6] = pixels[(y + i)*max_x + x + 6];
+		pDst[7] = pixels[(y + i)*max_x + x + 7];
+	}
+
+
+	// *** quantise the pixels
+	dctCUDA(sample);
+
+	// for each pixel in the block, round to zero using table and store in output
+	for (int i = 0; i < 64; i++)
+	{
+		auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+
+		// round to zero
+		if (sample[zag[i]] < 0) {
+			signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i]));
+		}
+		else {
+			signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i]));
+		}
+	}
+}
+
+
+__global__ void quantiseKernelOffset(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag, int offset)
+{
+
+
+	// for each block. quanitse.
+	int y = (offset * max_y) + threadIdx.x * 8;
+	int x = (offset * max_x) + blockIdx.x * 8;
+
+
+	// do work
+
+	// *** load block of 64 pixels (8x8)
+
+	double sample[64];
+
+	double *pDst = sample;
+
+	for (int i = 0; i < 8; i++, pDst += 8)
+	{
+		// get each pixel into sample
+		pDst[0] = pixels[(y + i)*max_x + x + 0];
+		pDst[1] = pixels[(y + i)*max_x + x + 1];
+		pDst[2] = pixels[(y + i)*max_x + x + 2];
+		pDst[3] = pixels[(y + i)*max_x + x + 3];
+		pDst[4] = pixels[(y + i)*max_x + x + 4];
+		pDst[5] = pixels[(y + i)*max_x + x + 5];
+		pDst[6] = pixels[(y + i)*max_x + x + 6];
+		pDst[7] = pixels[(y + i)*max_x + x + 7];
+	}
+
+	printf("offset: %d pixels: %f cuda x: %d, y: %d\n", offset, pixels[(y)*max_x + x + 0], x, y);
+	// *** quantise the pixels
+	dctCUDA(sample);
+
+	// for each pixel in the block, round to zero using table and store in output
+	for (int i = 0; i < 64; i++)
+	{
+		auto ptr = &dctqs[(64 * (y / 8 * max_x / 8 + x / 8))];
+
+		printf("huff %d, %d\n", i + (offset * 64), huffman_quantise_table[i + (offset * 64)]);
+
+		//multiply offset by 64 as that's the size of the quantisation table
+
+		// round to zero
+		if (sample[zag[i]] < 0) {
+			signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i+(offset*64)] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i+(offset*64)]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i+(offset*64)]));
+		}
+		else {
+			signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i+(offset*64)] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i+(offset*64)]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i+(offset*64)]));
+		}
+	}
+}
+
+void CheckCUDA()
+{
+	cudaError_t error = cudaGetLastError();
+	if (error != cudaSuccess)
+	{
+		// print the CUDA error message and exit
+		printf("CUDA error: %s\n", cudaGetErrorString(error));
+		throw;
+	}
+}
+
 bool jpeg_encoder::compress_image()
 {
 	// timer start here
 	auto startTime = std::chrono::system_clock::now();
 	std::vector<std::thread> threads;
 
-	// possible area of speed-upc
-	int c = 0;
-   // for(int c=0; c < m_num_components; c++) {
-        
-		
-		for (int y = 0; y < m_image[c].m_y; y+= 8) {
-			for (int x = 0; x < m_image[c].m_x; x += 8) {
-				
-				cout << x << endl;
-				//threads.push_back(thread(&quantiseThread, this, c, x, y));
-				threads.push_back(thread(quantiseThreaded, m_image[c], m_huff[c > 0], x, y));
-            }
-        } 
+	// new quantise
+	//quantiseALL(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
 
-  //  }
-	int i = 0;
-	for (auto &t : threads)
+	float* pixBuff;
+	signed short* quantisedSampleBuff;
+	signed int* huffBuff;
+	unsigned char* zagBuff;
+
+	size_t maxX = m_image->m_x;
+	size_t maxY = m_image->m_y;
+
+	cudaStream_t streams[3]; // maximum of 3 streams
+
+
+	// allocate memory on device, buffer ptr and size
+	cudaMalloc((void**)&pixBuff, (sizeof(float)* maxX * maxY * m_num_components));
+	cudaMalloc((void**)&quantisedSampleBuff, sizeof(signed short)* maxX * maxY * m_num_components);
+	cudaMalloc((void**)&huffBuff, sizeof(signed int) * 64 * m_num_components);
+	cudaMalloc((void**)&zagBuff, sizeof(unsigned char) * 64);
+
+	// copy to device
+
+	for (int c = 0; c < m_num_components; c++)
 	{
-		t.join();
-		i++;
-		cout << i << " joined" << endl;
+		cudaStreamCreate(&streams[c]);
+		cudaDeviceSynchronize();
+		//word size
+		cudaMemcpyAsync(pixBuff + (c * maxX * maxY), &m_image[c].m_pixels[0], sizeof(float)* maxX * maxY, cudaMemcpyHostToDevice, streams[c]);
+		cudaMemcpyAsync(quantisedSampleBuff + (c *  maxX * maxY), &m_image[c].m_dctqs[0], sizeof(signed short)* maxX * maxY, cudaMemcpyHostToDevice, streams[c]);
+		cudaMemcpyAsync(huffBuff + (c  * 64), &m_huff[c>0].m_quantization_table[0], sizeof(signed int) * 64, cudaMemcpyHostToDevice, streams[c]);
 	}
+	CheckCUDA();
+	cudaMemcpyAsync(zagBuff, &s_zag[0], sizeof(unsigned char) * 64, cudaMemcpyHostToDevice);
 
+	CheckCUDA();
+	//quantiseALL << < 1, 1 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+
+	//quantiseManyThreads << < 1, maxY/8 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+	//quantiseManyBlocks << < maxY / 8, 1 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+	//quantiseKernel << < (maxX/8), (maxY/8) >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+	cudaDeviceSynchronize();
+	//for (int c = 0; c < m_num_components; c++)
+
+	quantiseALLOFFSET << < 1, 1 >> > (m_num_components, maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+
+	CheckCUDA();
+	cudaDeviceSynchronize();
+	CheckCUDA();
+
+	// copy back into image
+	for (int c = 0; c < m_num_components; c++)
+		cudaMemcpyAsync(&m_image[c].m_dctqs[0], quantisedSampleBuff + (maxX * maxY * c), sizeof(signed short)* maxX * maxY, cudaMemcpyDeviceToHost, streams[c]);
+
+
+	cudaDeviceSynchronize();
+	cudaFree(pixBuff);
+	cudaFree(quantisedSampleBuff);
+	cudaFree(huffBuff);
+	cudaFree(zagBuff);
+
+
+	// continue sequentially
     for (int y = 0; y < m_y; y+= m_mcu_h) {
         code_mcu_row(y, false);
     }
