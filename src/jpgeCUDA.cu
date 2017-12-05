@@ -860,7 +860,6 @@ void quantiseThreaded(image& m_image, huffman_dcac& m_huff, int x, int y)
 
 		//m_image.get_dctq(x, y)[i] = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
 		auto ptr = &m_image.m_dctqs[64 * (y / 8 * m_image.m_x / 8 + x / 8)];
-		ptr[i];// = round_to_zero(sample[s_zag[i]], m_huff.m_quantization_table[i]);
 
 		// round to zero
 		if (sample[s_zag[i]] < 0) {
@@ -1021,6 +1020,72 @@ __global__ void quantiseALL(int max_x, int max_y, float * pixels, signed short* 
 	}
 }
 
+__global__ void quantiseALLOFFSET(int offset, int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
+{
+	int startX = 0;
+	int startY = 0;
+
+	// for each block. quanitse.
+	//for (int c = 0; c < offset; c++)
+	{
+		//startX *= c;
+		//startY *= c;
+		for (int y = 0; y < max_y * offset; y += 8)
+		{
+			for (int x = 0; x < max_x * offset; x += 8)
+			{
+
+				// do work
+
+				// *** load block of 64 pixels (8x8)
+
+				double sample[64];
+
+				double *pDst = sample;
+
+				for (int i = 0; i < 8; i++, pDst += 8)
+				{
+					// get each pixel into sample
+					pDst[0] = pixels[(y + i)* max_x  + x + 0];
+					pDst[1] = pixels[(y + i)* max_x  + x + 1];
+					pDst[2] = pixels[(y + i)* max_x  + x + 2];
+					pDst[3] = pixels[(y + i)* max_x  + x + 3];
+					pDst[4] = pixels[(y + i)* max_x  + x + 4];
+					pDst[5] = pixels[(y + i)* max_x  + x + 5];
+					pDst[6] = pixels[(y + i)* max_x  + x + 6];
+					pDst[7] = pixels[(y + i)* max_x  + x + 7];
+				}
+
+
+				// *** quantise the pixels
+				dctCUDA(sample);
+
+				// for each pixel in the block, round to zero using table and store in output
+				for (int i = 0; i < 64; i++)
+				{
+					auto ptr = &dctqs[64 * (y / 8 * max_x / 8 + x / 8)];
+
+					signed int huffQ;
+					if (x > 64 || y > 64)
+						huffQ = huffman_quantise_table[i + 64];
+					else
+						huffQ = huffman_quantise_table[i];
+
+					// round to zero
+					if (sample[zag[i]] < 0) {
+						signed short jtmp = -sample[zag[i]] + (huffQ >> 1);
+						ptr[i] = (jtmp < huffQ) ? 0 : static_cast<signed short>(-(jtmp / huffQ));
+					}
+					else {
+						signed short jtmp = sample[zag[i]] + (huffQ >> 1);
+						ptr[i] = (jtmp < huffQ) ? 0 : static_cast<signed short>((jtmp / huffQ));
+					}
+				}
+			}
+		}
+	}
+}
+
 __global__ void quantiseManyThreads(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
 {
 	int y = threadIdx.x * 8;
@@ -1169,6 +1234,62 @@ __global__ void quantiseKernel(int max_x, int max_y, float * pixels, signed shor
 	}
 }
 
+
+__global__ void quantiseKernelOffset(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag, int offset)
+{
+
+
+	// for each block. quanitse.
+	int y = (offset * max_y) + threadIdx.x * 8;
+	int x = (offset * max_x) + blockIdx.x * 8;
+
+
+	// do work
+
+	// *** load block of 64 pixels (8x8)
+
+	double sample[64];
+
+	double *pDst = sample;
+
+	for (int i = 0; i < 8; i++, pDst += 8)
+	{
+		// get each pixel into sample
+		pDst[0] = pixels[(y + i)*max_x + x + 0];
+		pDst[1] = pixels[(y + i)*max_x + x + 1];
+		pDst[2] = pixels[(y + i)*max_x + x + 2];
+		pDst[3] = pixels[(y + i)*max_x + x + 3];
+		pDst[4] = pixels[(y + i)*max_x + x + 4];
+		pDst[5] = pixels[(y + i)*max_x + x + 5];
+		pDst[6] = pixels[(y + i)*max_x + x + 6];
+		pDst[7] = pixels[(y + i)*max_x + x + 7];
+	}
+
+	printf("offset: %d pixels: %f cuda x: %d, y: %d\n", offset, pixels[(y)*max_x + x + 0], x, y);
+	// *** quantise the pixels
+	dctCUDA(sample);
+
+	// for each pixel in the block, round to zero using table and store in output
+	for (int i = 0; i < 64; i++)
+	{
+		auto ptr = &dctqs[(64 * (y / 8 * max_x / 8 + x / 8))];
+
+		printf("huff %d, %d\n", i + (offset * 64), huffman_quantise_table[i + (offset * 64)]);
+
+		//multiply offset by 64 as that's the size of the quantisation table
+
+		// round to zero
+		if (sample[zag[i]] < 0) {
+			signed short jtmp = -sample[zag[i]] + (huffman_quantise_table[i+(offset*64)] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i+(offset*64)]) ? 0 : static_cast<signed short>(-(jtmp / huffman_quantise_table[i+(offset*64)]));
+		}
+		else {
+			signed short jtmp = sample[zag[i]] + (huffman_quantise_table[i+(offset*64)] >> 1);
+			ptr[i] = (jtmp < huffman_quantise_table[i+(offset*64)]) ? 0 : static_cast<signed short>((jtmp / huffman_quantise_table[i+(offset*64)]));
+		}
+	}
+}
+
 void CheckCUDA()
 {
 	cudaError_t error = cudaGetLastError();
@@ -1188,27 +1309,37 @@ bool jpeg_encoder::compress_image()
 
 	// new quantise
 	//quantiseALL(int max_x, int max_y, float * pixels, signed short* dctqs, signed int* huffman_quantise_table, unsigned char* zag)
-	
+
 	float* pixBuff;
 	signed short* quantisedSampleBuff;
 	signed int* huffBuff;
 	unsigned char* zagBuff;
-	
+
 	size_t maxX = m_image->m_x;
 	size_t maxY = m_image->m_y;
 
+	cudaStream_t streams[3]; // maximum of 3 streams
+
+
 	// allocate memory on device, buffer ptr and size
-	cudaMalloc((void**)&pixBuff, sizeof(float)* maxX * maxY);
-	cudaMalloc((void**)&quantisedSampleBuff, sizeof(signed short)* maxX * maxY);
-	cudaMalloc((void**)&huffBuff, sizeof(signed int)* 64);
+	cudaMalloc((void**)&pixBuff, (sizeof(float)* maxX * maxY * m_num_components));
+	cudaMalloc((void**)&quantisedSampleBuff, sizeof(signed short)* maxX * maxY * m_num_components);
+	cudaMalloc((void**)&huffBuff, sizeof(signed int) * 64 * m_num_components);
 	cudaMalloc((void**)&zagBuff, sizeof(unsigned char) * 64);
 
 	// copy to device
-	int c = 0;
-	cudaMemcpy(pixBuff, &m_image[c].m_pixels[0], sizeof(float)* maxX * maxY, cudaMemcpyHostToDevice);
-	cudaMemcpy(quantisedSampleBuff, &m_image[c].m_dctqs[0], sizeof(signed short)* maxX * maxY, cudaMemcpyHostToDevice);
-	cudaMemcpy(huffBuff, &m_huff->m_quantization_table[0], sizeof(signed int) * 64, cudaMemcpyHostToDevice);
-	cudaMemcpy(zagBuff, &s_zag[0], sizeof(unsigned char) * 64, cudaMemcpyHostToDevice);
+
+	for (int c = 0; c < m_num_components; c++)
+	{
+		cudaStreamCreate(&streams[c]);
+		cudaDeviceSynchronize();
+		//word size
+		cudaMemcpyAsync(pixBuff + (c * maxX * maxY), &m_image[c].m_pixels[0], sizeof(float)* maxX * maxY, cudaMemcpyHostToDevice, streams[c]);
+		cudaMemcpyAsync(quantisedSampleBuff + (c *  maxX * maxY), &m_image[c].m_dctqs[0], sizeof(signed short)* maxX * maxY, cudaMemcpyHostToDevice, streams[c]);
+		cudaMemcpyAsync(huffBuff + (c  * 64), &m_huff[c>0].m_quantization_table[0], sizeof(signed int) * 64, cudaMemcpyHostToDevice, streams[c]);
+	}
+	CheckCUDA();
+	cudaMemcpyAsync(zagBuff, &s_zag[0], sizeof(unsigned char) * 64, cudaMemcpyHostToDevice);
 
 	CheckCUDA();
 	//quantiseALL << < 1, 1 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
@@ -1216,18 +1347,26 @@ bool jpeg_encoder::compress_image()
 	//quantiseManyThreads << < 1, maxY/8 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
 	//quantiseManyBlocks << < maxY / 8, 1 >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
 	//quantiseKernel << < (maxX/8), (maxY/8) >> > (maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
+	cudaDeviceSynchronize();
+	//for (int c = 0; c < m_num_components; c++)
+
+	quantiseALLOFFSET << < 1, 3 >> > (m_num_components, maxX, maxY, pixBuff, quantisedSampleBuff, huffBuff, zagBuff);
 
 	CheckCUDA();
 	cudaDeviceSynchronize();
 	CheckCUDA();
 
 	// copy back into image
-	cudaMemcpy(&m_image[c].m_dctqs[0], quantisedSampleBuff, sizeof(signed short)* maxX * maxY, cudaMemcpyDeviceToHost);
+	for (int c = 0; c < m_num_components; c++)
+		cudaMemcpyAsync(&m_image[c].m_dctqs[0], quantisedSampleBuff + (maxX * maxY * c), sizeof(signed short)* maxX * maxY, cudaMemcpyDeviceToHost, streams[c]);
 
+
+	cudaDeviceSynchronize();
 	cudaFree(pixBuff);
 	cudaFree(quantisedSampleBuff);
 	cudaFree(huffBuff);
 	cudaFree(zagBuff);
+
 
 	// continue sequentially
     for (int y = 0; y < m_y; y+= m_mcu_h) {
