@@ -1380,19 +1380,63 @@ void jpeg_encoder::deinit()
     clear();
 }
 
+__global__ void load_mcu_YCC_CUDA(const unsigned char *pSrc, int width, int bpp, int height, float *pixels, int m_x, int offset)
+{
+	for (int y = 0; y < height; y++)
+	{
+
+		for (int x = 0; x < width; x++)
+		{
+			auto src = reinterpret_cast<const rgba *>(pSrc);
+			const int r = src[x].r, g = src[x].g, b = src[x].b;
+
+			pixels[y*m_x + x] = (0.299     * r) + (0.587     * g) + (0.114     * b) - 128.0;
+			pixels[offset + (y*m_x + x)] = -(0.168736  * r) - (0.331264  * g) + (0.5       * b);
+			pixels[offset*2 + (y*m_x + x)] = (0.5       * r) - (0.418688  * g) - (0.081312  * b);
+		}
+
+		//else {
+		//	Y_to_YCC(m_image, pSrc, width, y);
+		//}
+
+		// Possibly duplicate pixels at end of scanline if not a multiple of 8 or 16
+	}
+}
+
 bool jpeg_encoder::read_image(const uint8 *image_data, int width, int height, int bpp)
 {
     if (bpp != 1 && bpp != 3 && bpp != 4) {
         return false;
     }
 
-    for (int y = 0; y < height; y++) {
-        if (m_num_components == 1) {
-            load_mcu_Y(image_data + width * y * bpp, width, bpp, y);
-        } else {
-            load_mcu_YCC(image_data + width * y * bpp, width, bpp, y);
-        }
-    }
+	// can also parallelis this
+	if (m_num_components == 1)
+	{
+		for (int y = 0; y < height; y++)
+		{
+			load_mcu_Y(image_data + width * y * bpp, width, bpp, y);
+		}
+	}
+	else
+	{
+		//for (int y = 0; y < height; y++)
+		//{
+		//	load_mcu_YCC(image_data + width * y * bpp, width, bpp, y);
+		//}
+
+		float* pixBuffer;
+		unsigned char* imgBuff;
+
+		cudaMalloc((void**)&pixBuffer, (sizeof(float)* m_image->m_x * m_image->m_y * m_num_components));
+
+		for (int c = 0; c < m_num_components; c++)
+		{
+			cudaMemcpyAsync(&pixBuffer[c* m_image[c].m_x *  m_image[c].m_x], &m_image[c].m_pixels[0], sizeof(float)*m_image[c].m_x *  m_image[c].m_x, cudaMemcpyHostToDevice);
+		}
+
+		load_mcu_YCC_CUDA << < 1, 1 >> > (image_data, width, bpp, height, pixBuffer, m_image[0].m_x, m_image[c].m_x *  m_image[c].m_x);
+	}
+
 
     for(int c=0; c < m_num_components; c++) {
         for (int y = height; y < m_image[c].m_y; y++) {
