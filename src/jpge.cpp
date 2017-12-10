@@ -20,8 +20,11 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+#include <stdio.h> 
 #include <math.h>
+#include <omp.h>
+#include <chrono>
+#include <fstream>
 
 #define JPGE_MAX(a,b) (((a)>(b))?(a):(b))
 #define JPGE_MIN(a,b) (((a)<(b))?(a):(b))
@@ -37,7 +40,7 @@ static inline void jpge_free(void *p)
 {
     free(p);
 }
-
+ 
 // Various JPEG enums and tables.
 enum { M_SOF0 = 0xC0, M_DHT = 0xC4, M_SOI = 0xD8, M_EOI = 0xD9, M_SOS = 0xDA, M_DQT = 0xDB, M_APP0 = 0xE0 };
 enum { DC_LUM_CODES = 12, AC_LUM_CODES = 256, DC_CHROMA_CODES = 12, AC_CHROMA_CODES = 256, MAX_HUFF_SYMBOLS = 257, MAX_HUFF_CODESIZE = 32 };
@@ -823,7 +826,10 @@ bool jpeg_encoder::emit_end_markers()
 
 bool jpeg_encoder::compress_image()
 {
-    for(int c=0; c < m_num_components; c++) {
+    for(int c=0; c < m_num_components; c++)
+	{
+
+#pragma omp parallel for schedule(dynamic)
         for (int y = 0; y < m_image[c].m_y; y+= 8) {
             for (int x = 0; x < m_image[c].m_x; x += 8) {
                 dct_t sample[64];
@@ -927,6 +933,7 @@ bool jpeg_encoder::read_image(const uint8 *image_data, int width, int height, in
         return false;
     }
 
+#pragma omp parallel for schedule(dynamic)
     for (int y = 0; y < height; y++) {
         if (m_num_components == 1) {
             load_mcu_Y(image_data + width * y * bpp, width, bpp, y);
@@ -1041,6 +1048,10 @@ bool compress_image_to_stream(output_stream &dst_stream, int width, int height, 
         return false;
     }
 
+
+	// timer start here (before places that can be parallelised)
+	auto startTime = std::chrono::system_clock::now();
+
     if (!encoder.read_image(pImage_data, width, height, num_channels)) {
         return false;
     }
@@ -1048,6 +1059,16 @@ bool compress_image_to_stream(output_stream &dst_stream, int width, int height, 
     if (!encoder.compress_image()) {
         return false;
     }
+
+	// end timer (after parallisation)
+	auto endTime = std::chrono::system_clock::now();
+	auto totalTime = endTime - startTime;
+
+	std::ofstream ofs;
+	ofs.open("test.csv", std::ofstream::out | std::ofstream::app);
+
+	ofs << std::chrono::duration_cast<std::chrono::milliseconds>(totalTime).count() << ", ";
+	ofs.close();
 
     encoder.deinit();
     return true;
