@@ -878,8 +878,6 @@ struct task_data
 	unsigned long id;
 	task_func work;
 	vector<void*> data_;
-	jpge::image* image_data;
-	jpge::huffman_dcac* huff_data;
 	int x_;
 	int y_;
 };
@@ -947,7 +945,7 @@ void wait_for_tasks(condition_variable& sem, mutex& queueMtx)
 bool jpeg_encoder::compress_image()
 {
 	// possible area of speed-up
-	
+	int count = 0;
 	// for each block create a task and add it to the queue
     for(int c=0; c < m_num_components; c++)
 	{
@@ -960,18 +958,21 @@ bool jpeg_encoder::compress_image()
 				
 				// push a new task onto the queue
 				tasks.push(*makeTask(quantiseThreaded, &m_image[c], &m_huff[c > 0], x, y));
-				
+				count++;
 				// notify one waiting thread to pick up task
 				semaphore.notify_one();
             }
         } 
 
     }
+	
 
 	// ensure all the tasks are finished before continuing as it is dependent on the results
-	while (!tasks.empty())
+	while (true)
 	{
-		// spin lock 
+		unique_lock<mutex> lock(mtx);
+		if (tasks.empty())
+			break;
 	}
 
 	// continue with algorithm sequentially
@@ -1158,15 +1159,16 @@ bool jpeg_encoder::read_image(const uint8 *image_data, int width, int height, in
 		semaphore.notify_one();
     }
 
-	// spin lock wait here
-	while (!tasks.empty()) {	}
+	//for (int y = 0; y < height; y++) {
+	//	if (m_num_components == 1) {
+	//		load_mcu_Y(image_data + width * y * bpp, width, bpp, y);
+	//	}
+	//	else {
+	//		load_mcu_YCC(image_data + width * y * bpp, width, bpp, y);
+	//	}
+	//}
 
-	// free memory
-	for(auto &i : imageData)
-	{
-		delete(i);
-		i = nullptr;
-	}
+
 
     for(int c=0; c < m_num_components; c++) {
         for (int y = height; y < m_image[c].m_y; y++) {
